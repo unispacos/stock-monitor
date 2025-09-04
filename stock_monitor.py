@@ -10,9 +10,19 @@ WEBHOOK_URL = os.environ.get('DISCORD_WEBHOOK')
 # 한국 시간대 설정
 KST = pytz.timezone('Asia/Seoul')
 
+# 운영 시간 설정 (오전 8시 ~ 오후 11시)
+START_HOUR = 8
+END_HOUR = 23
+
 def get_kst_time():
-    """한국 시간을 반환하는 함수"""
+    return datetime.now(KST)
+
+def get_kst_time_str():
     return datetime.now(KST).strftime('%Y-%m-%d %H:%M:%S KST')
+
+def is_operating_hours():
+    current_hour = get_kst_time().hour
+    return START_HOUR <= current_hour < END_HOUR
 
 def check_stock():
     try:
@@ -49,16 +59,24 @@ def send_discord_message(msg):
         return False
 
 def main():
-    current_time = get_kst_time()  # KST 시간 사용
-    print(f"[{current_time}] 재고 확인 시작...")
+    current_time_str = get_kst_time_str()
+    current_hour = get_kst_time().hour
     
+    print(f"[{current_time_str}] 재고 체크 시작...")
+    
+    if not is_operating_hours():
+        print(f"😴 운영 시간이 아닙니다 (현재: {current_hour}시)")
+        print(f"⏰ 운영시간: 오전 {START_HOUR}시 ~ 오후 {END_HOUR}시")
+        return
+    
+    print(f"🔍 운영 시간 내 - 재고 확인 중...")
     in_stock = check_stock()
     
     if in_stock:
         success_msg = f"🚨 **재고 알림!** 🚨\n\n" \
                      f"✅ **상품 재고가 풀렸습니다!**\n\n" \
                      f"🔗 **바로 구매하기**: {PRODUCT_URL}\n\n" \
-                     f"⏰ 발견 시간: {current_time}\n" \
+                     f"⏰ 발견 시간: {current_time_str}\n" \
                      f"🏃‍♂️ **빠르게 구매하세요!**"
         
         send_discord_message(success_msg)
