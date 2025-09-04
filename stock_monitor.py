@@ -1,88 +1,75 @@
 import requests
 from bs4 import BeautifulSoup
+import time
 import os
-from datetime import datetime
-import pytz
+from datetime import datetime, timedelta, timezone
 
 PRODUCT_URL = "https://shop.weverse.io/ko/shop/KRW/artists/155/sales/44783"
-WEBHOOK_URL = os.environ.get('DISCORD_WEBHOOK')
+WEBHOOK_URL = os.environ.get("DISCORD_WEBHOOK")  # GitHub Secrets에서 불러옴
 
-# 한국 시간대 설정
-KST = pytz.timezone('Asia/Seoul')
-
-# 운영 시간 설정 (오전 8시 ~ 오후 11시)
-START_HOUR = 8
-END_HOUR = 23
-
-def get_kst_time():
-    return datetime.now(KST)
-
-def get_kst_time_str():
-    return datetime.now(KST).strftime('%Y-%m-%d %H:%M:%S KST')
-
-def is_operating_hours():
-    current_hour = get_kst_time().hour
-    return START_HOUR <= current_hour < END_HOUR
+KST = timezone(timedelta(hours=9))  # KST 기준
+OPER_START = 9   # 오전 9시 운영 시작
+OPER_END = 23    # 오후 11시 운영 종료
 
 def check_stock():
     try:
-        headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
-        }
-        response = requests.get(PRODUCT_URL, headers=headers, timeout=10)
-        soup = BeautifulSoup(response.text, "html.parser")
-        page_text = soup.get_text()
-        
-        if "품절" not in page_text and "sold out" not in page_text.lower():
-            return True
-        return False
+        response = requests.get(PRODUCT_URL, timeout=20)
+        response.raise_for_status()
     except Exception as e:
-        print(f"체크 중 에러: {e}")
-        return False
+        send_discord_message(f"⚠️ [에러] 페이지 요청 실패: {e}")
+        return None
+    soup = BeautifulSoup(response.text, "html.parser")
+    return "품절" not in soup.get_text()
 
 def send_discord_message(msg):
     if not WEBHOOK_URL:
-        print("웹훅 URL이 없습니다!")
-        return False
-        
-    data = {"content": msg}
-    try:
-        response = requests.post(WEBHOOK_URL, json=data, timeout=10)
-        if response.status_code == 204:
-            print("디스코드 알림 전송 완료!")
-            return True
-        else:
-            print(f"알림 전송 실패: {response.status_code}")
-            return False
-    except Exception as e:
-        print(f"알림 전송 에러: {e}")
-        return False
-
-def main():
-    current_time_str = get_kst_time_str()
-    current_hour = get_kst_time().hour
-    
-    print(f"[{current_time_str}] 재고 체크 시작...")
-    
-    if not is_operating_hours():
-        print(f"😴 운영 시간이 아닙니다 (현재: {current_hour}시)")
-        print(f"⏰ 운영시간: 오전 {START_HOUR}시 ~ 오후 {END_HOUR}시")
+        print("❌ DISCORD_WEBHOOK 환경변수가 설정되지 않았습니다.")
         return
-    
-    print(f"🔍 운영 시간 내 - 재고 확인 중...")
-    in_stock = check_stock()
-    
-    if in_stock:
-        success_msg = f"🚨 **재고 알림!** 🚨\n\n" \
-                     f"✅ **상품 재고가 풀렸습니다!**\n\n" \
-                     f"🔗 **바로 구매하기**: {PRODUCT_URL}\n\n" \
-                     f"⏰ 발견 시간: {current_time_str}\n" \
-                     f"🏃‍♂️ **빠르게 구매하세요!**"
-        
-        send_discord_message(success_msg)
-        print("🎉 재고 발견! 알림 전송!")
-    else:
-        print("⏳ 아직 품절 상태입니다.")
+    try:
+        data = {"content": msg}
+        r = requests.post(WEBHOOK_URL, json=data, timeout=10)
+        r.raise_for_status()
+    except Exception as e:
+        print(f"❌ 알림 전송 실패: {e}")
 
 if __name__ == "__main__":
-    main()
+    # 최초 실행 알림
+    send_discord_message("📢 [알림] 모니터링 프로그램을 시작합니다. (KST 기준)")
+
+    last_status = None
+    last_oper_day = None
+    last_heartbeat = datetime.now(KST)
+
+    while True:
+        now = datetime.now(KST)
+        hour = now.hour
+        in_oper = OPER_START <= hour < OPER_END
+
+        # 운영 시작 알림
+        if in_oper and last_oper_day != now.date():
+            send_discord_message(f"✅ [운영시작] {now.strftime('%Y-%m-%d %H:%M')} 모니터링 시작합니다.")
+            last_oper_day = now.date()
+            last_heartbeat = now
+
+        # 운영 종료 알림
+        if not in_oper and last_oper_day == now.date():
+            send_discord_message(f"🛑 [운영종료] {now.strftime('%Y-%m-%d %H:%M')} 모니터링 종료합니다.")
+            last_oper_day = None
+
+        # 운영시간 내 모니터링
+        if in_oper:
+            in_stock = check_stock()
+            if in_stock is None:
+                pass  # 요청 실패 시 스킵
+            elif in_stock and last_status != "in_stock":
+                send_discord_message("🚨 상품 재고가 풀렸습니다! 👉 " + PRODUCT_URL)
+                last_status = "in_stock"
+            elif not in_stock:
+                last_status = "sold_out"
+
+            # 2시간마다 heartbeat 알림
+            if now - last_heartbeat >= timedelta(hours=2):
+                send_discord_message(f"⏰ [정상작동중] {now.strftime('%H:%M')} - 모니터링 정상 진행 중입니다.")
+                last_heartbeat = now
+
+        time.sleep(60)  # 1분 간격으로 체크
