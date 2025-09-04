@@ -1,0 +1,26 @@
+name: Webhook Test
+
+on:
+  workflow_dispatch: # 수동 실행만
+
+jobs:
+  test-webhook:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Set up Python
+      uses: actions/setup-python@v3
+      with:
+        python-version: '3.9'
+    
+    - name: Install dependencies
+      run: |
+        pip install requests pytz
+    
+    - name: Test webhook
+      env:
+        DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
+      run: |
+        python test_webhook.py
