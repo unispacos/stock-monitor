@@ -1,0 +1,29 @@
+name: Stock Monitor
+
+on:
+  schedule:
+    # 2분마다 실행 (운영시간은 코드에서 체크)
+    - cron: '*/2 * * * *'
+  workflow_dispatch: # 수동 실행 가능
+
+jobs:
+  check-stock:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Set up Python
+      uses: actions/setup-python@v3
+      with:
+        python-version: '3.9'
+    
+    - name: Install dependencies
+      run: |
+        pip install requests beautifulsoup4 pytz
+    
+    - name: Check stock
+      env:
+        DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
+      run: |
+        python stock_monitor.py
